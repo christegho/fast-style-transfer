@@ -5,7 +5,7 @@ import tensorflow as tf, numpy as np, os
 import transform
 from utils import get_img
 
-STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
+STYLE_LAYERS = [('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1'), ('relu5_1')]
 CONTENT_LAYER = 'relu4_2'
 DEVICES = 'CUDA_VISIBLE_DEVICES'
 
@@ -33,62 +33,69 @@ def optimize(content_targets, style_target, content_weight, style_weight,
         style_image_pre = vgg.preprocess(style_image)
         net = vgg.net(vgg_path, style_image_pre)
         style_pre = np.array([style_target])
-        for layer in STYLE_LAYERS:
-            features = net[layer].eval(feed_dict={style_image:style_pre})
-            features = np.reshape(features, (-1, features.shape[3]))
-            gram = np.matmul(features.T, features) / features.size
-            style_features[layer] = gram
+        for gpu_ind in range(len(STYLE_LAYERS)):
+            for layer in STYLE_LAYERS[gpu_ind]:
+                features = net[layer].eval(feed_dict={style_image:style_pre})
+                features = np.reshape(features, (-1, features.shape[3]))
+                gram = np.matmul(features.T, features) / features.size
+                style_features[layer] = gram
 
-    with tf.Graph().as_default(), tf.Session() as sess:
+    config = tf.configProto(allow_soft_placement=True)
+    with tf.Graph().as_default(), tf.Session(config=config) as sess:
         X_content = tf.placeholder(tf.float32, shape=batch_shape, name="X_content")
         X_pre = vgg.preprocess(X_content)
 
         # precompute content features
-        content_features = {}
-        content_net = vgg.net(vgg_path, X_pre)
-        content_features[CONTENT_LAYER] = content_net[CONTENT_LAYER]
+        with tf.device('/gpu:1'):
+            content_features = {}
+            content_net = vgg.net(vgg_path, X_pre)
+            content_features[CONTENT_LAYER] = content_net[CONTENT_LAYER]
 
-        if slow:
-            preds = tf.Variable(
-                tf.random_normal(X_content.get_shape()) * 0.256
+            if slow:
+                preds = tf.Variable(
+                    tf.random_normal(X_content.get_shape()) * 0.256
+                )
+                preds_pre = preds
+            else:
+                preds = transform.net(X_content/255.0)
+                preds_pre = vgg.preprocess(preds)
+
+            net = vgg.net(vgg_path, preds_pre)
+
+            content_size = _tensor_size(content_features[CONTENT_LAYER])*batch_size
+            assert _tensor_size(content_features[CONTENT_LAYER]) == _tensor_size(net[CONTENT_LAYER])
+            content_loss = content_weight * (2 * tf.nn.l2_loss(
+                net[CONTENT_LAYER] - content_features[CONTENT_LAYER]) / content_size
             )
-            preds_pre = preds
-        else:
-            preds = transform.net(X_content/255.0)
-            preds_pre = vgg.preprocess(preds)
-
-        net = vgg.net(vgg_path, preds_pre)
-
-        content_size = _tensor_size(content_features[CONTENT_LAYER])*batch_size
-        assert _tensor_size(content_features[CONTENT_LAYER]) == _tensor_size(net[CONTENT_LAYER])
-        content_loss = content_weight * (2 * tf.nn.l2_loss(
-            net[CONTENT_LAYER] - content_features[CONTENT_LAYER]) / content_size
-        )
 
         style_losses = []
-        for style_layer in STYLE_LAYERS:
-            layer = net[style_layer]
-            bs, height, width, filters = map(lambda i:i.value,layer.get_shape())
-            size = height * width * filters
-            feats = tf.reshape(layer, (bs, height * width, filters))
-            feats_T = tf.transpose(feats, perm=[0,2,1])
-            grams = tf.matmul(feats_T, feats) / size
-            style_gram = style_features[style_layer]
-            style_losses.append(2 * tf.nn.l2_loss(grams - style_gram)/style_gram.size)
+        for gpu_ind in range(len(STYLE_LAYERS)):
+            with tf.device('/gpu:{}'.format(gpu_ind)):
+                for layer in STYLE_LAYERS[gpu_ind]:
+                    layer = net[style_layer]
+                    bs, height, width, filters = map(lambda i:i.value,layer.get_shape())
+                    size = height * width * filters
+                    feats = tf.reshape(layer, (bs, height * width, filters))
+                    feats_T = tf.transpose(feats, perm=[0,2,1])
+                    grams = tf.matmul(feats_T, feats) / size
+                    style_gram = style_features[style_layer]
+                    style_losses.append(2 * tf.nn.l2_loss(grams - style_gram)/style_gram.size)
 
         style_loss = style_weight * functools.reduce(tf.add, style_losses) / batch_size
 
         # total variation denoising
-        tv_y_size = _tensor_size(preds[:,1:,:,:])
-        tv_x_size = _tensor_size(preds[:,:,1:,:])
-        y_tv = tf.nn.l2_loss(preds[:,1:,:,:] - preds[:,:batch_shape[1]-1,:,:])
-        x_tv = tf.nn.l2_loss(preds[:,:,1:,:] - preds[:,:,:batch_shape[2]-1,:])
-        tv_loss = tv_weight*2*(x_tv/tv_x_size + y_tv/tv_y_size)/batch_size
+        with tf.device('/gpu:1'):
+            tv_y_size = _tensor_size(preds[:,1:,:,:])
+            tv_x_size = _tensor_size(preds[:,:,1:,:])
+            y_tv = tf.nn.l2_loss(preds[:,1:,:,:] - preds[:,:batch_shape[1]-1,:,:])
+            x_tv = tf.nn.l2_loss(preds[:,:,1:,:] - preds[:,:,:batch_shape[2]-1,:])
+            tv_loss = tv_weight*2*(x_tv/tv_x_size + y_tv/tv_y_size)/batch_size
 
         loss = content_loss + style_loss + tv_loss
 
         # overall loss
-        train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+        train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss, 
+            colocate_gradients_with_ops=True)
         sess.run(tf.global_variables_initializer())
         import random
         uid = random.randint(1, 100)
