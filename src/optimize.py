@@ -5,7 +5,7 @@ import tensorflow as tf, numpy as np, os
 import transform
 from utils import get_img
 
-STYLE_LAYERS = [('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1'), ('relu5_1')]
+STYLE_LAYERS = [['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1'], ['relu5_1']]
 CONTENT_LAYER = 'relu4_2'
 DEVICES = 'CUDA_VISIBLE_DEVICES'
 
@@ -35,12 +35,13 @@ def optimize(content_targets, style_target, content_weight, style_weight,
         style_pre = np.array([style_target])
         for gpu_ind in range(len(STYLE_LAYERS)):
             for layer in STYLE_LAYERS[gpu_ind]:
+                #import pdb; pdb.set_trace()
                 features = net[layer].eval(feed_dict={style_image:style_pre})
                 features = np.reshape(features, (-1, features.shape[3]))
                 gram = np.matmul(features.T, features) / features.size
                 style_features[layer] = gram
 
-    config = tf.configProto(allow_soft_placement=True)
+    config = tf.ConfigProto(allow_soft_placement=True)
     with tf.Graph().as_default(), tf.Session(config=config) as sess:
         X_content = tf.placeholder(tf.float32, shape=batch_shape, name="X_content")
         X_pre = vgg.preprocess(X_content)
@@ -71,7 +72,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
         style_losses = []
         for gpu_ind in range(len(STYLE_LAYERS)):
             with tf.device('/gpu:{}'.format(gpu_ind)):
-                for layer in STYLE_LAYERS[gpu_ind]:
+                for style_layer in STYLE_LAYERS[gpu_ind]:
                     layer = net[style_layer]
                     bs, height, width, filters = map(lambda i:i.value,layer.get_shape())
                     size = height * width * filters
