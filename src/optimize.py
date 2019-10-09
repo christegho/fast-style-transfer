@@ -42,6 +42,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
                 style_features[layer] = gram
 
     config = tf.ConfigProto(allow_soft_placement=True)
+    config.gpu_options.allow_growth = True
     with tf.Graph().as_default(), tf.Session(config=config) as sess:
         X_content = tf.placeholder(tf.float32, shape=batch_shape, name="X_content")
         X_pre = vgg.preprocess(X_content)
@@ -102,9 +103,11 @@ def optimize(content_targets, style_target, content_weight, style_weight,
         uid = random.randint(1, 100)
         print("UID: %s" % uid)
         for epoch in range(epochs):
+            print('epoch', epoch)
             num_examples = len(content_targets)
             iterations = 0
             while iterations * batch_size < num_examples:
+                print('iterations', iterations)
                 start_time = time.time()
                 curr = iterations * batch_size
                 step = curr + batch_size
