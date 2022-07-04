@@ -3,7 +3,7 @@ import functools
 import vgg, pdb, time
 import tensorflow as tf, numpy as np, os
 import transform
-from utils import get_img
+from utils import get_img, load_checkpoint
 
 STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
 CONTENT_LAYER = 'relu4_2'
@@ -26,7 +26,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
     batch_shape = (batch_size,256,256,3)
     style_shape = (1,) + style_target.shape
     print(style_shape)
-
+    
     # precompute style features
     with tf.Graph().as_default(), tf.device('/cpu:0'), tf.Session() as sess:
         style_image = tf.placeholder(tf.float32, shape=style_shape, name='style_image')
@@ -38,7 +38,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
             features = np.reshape(features, (-1, features.shape[3]))
             gram = np.matmul(features.T, features) / features.size
             style_features[layer] = gram
-
+            
     with tf.Graph().as_default(), tf.Session() as sess:
         X_content = tf.placeholder(tf.float32, shape=batch_shape, name="X_content")
         X_pre = vgg.preprocess(X_content)
@@ -89,7 +89,12 @@ def optimize(content_targets, style_target, content_weight, style_weight,
 
         # overall loss
         train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
-        sess.run(tf.global_variables_initializer())
+#         sess.run(tf.global_variables_initializer())
+        # Load an existing checkpoint, if one exists
+        checkpoint_dir = "/".join(save_path.split("/")[:-1])
+        if not load_checkpoint(sess, checkpoint_dir):
+            sess.run(tf.global_variables_initializer())
+            
         import random
         uid = random.randint(1, 100)
         print("UID: %s" % uid)
@@ -99,6 +104,7 @@ def optimize(content_targets, style_target, content_weight, style_weight,
             while iterations * batch_size < num_examples:
                 start_time = time.time()
                 curr = iterations * batch_size
+                print('ITERATION '+str(iterations), end='\r')
                 step = curr + batch_size
                 X_batch = np.zeros(batch_shape, dtype=np.float32)
                 for j, img_p in enumerate(content_targets[curr:step]):

@@ -12,12 +12,12 @@ STYLE_WEIGHT = 1e2
 TV_WEIGHT = 2e2
 
 LEARNING_RATE = 1e-3
-NUM_EPOCHS = 2
+NUM_EPOCHS = 9
 CHECKPOINT_DIR = 'checkpoints'
 CHECKPOINT_ITERATIONS = 2000
 VGG_PATH = 'data/imagenet-vgg-verydeep-19.mat'
 TRAIN_PATH = 'data/train2014'
-BATCH_SIZE = 4
+BATCH_SIZE = 20
 DEVICE = '/gpu:0'
 FRAC_GPU = 1
 
@@ -143,13 +143,13 @@ def main():
         options.tv_weight,
         options.vgg_path
     ]
-
+    
     for preds, losses, i, epoch in optimize(*args, **kwargs):
-        style_loss, content_loss, tv_loss, loss = losses
+#         style_loss, content_loss, tv_loss, loss = losses
 
-        print('Epoch %d, Iteration: %d, Loss: %s' % (epoch, i, loss))
-        to_print = (style_loss, content_loss, tv_loss)
-        print('style: %s, content:%s, tv: %s' % to_print)
+        print('Epoch %d, Iteration: %d' % (epoch, i))
+#         to_print = (style_loss, content_loss, tv_loss)
+#         print('style: %s, content:%s, tv: %s' % to_print)
         if options.test:
             assert options.test_dir != False
             preds_path = '%s/%s_%s.png' % (options.test_dir,epoch,i)
